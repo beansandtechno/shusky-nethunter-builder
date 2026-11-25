@@ -1,4 +1,4 @@
-name: Build Pixel 8 Pro (shusky) - NetHunter + KernelSU-Next (v1.35)
+name: Build Pixel 8 (shiba/shusky) - NetHunter + AR9271 (Magisk)
 
 on:
   push:
@@ -10,7 +10,7 @@ jobs:
   build-kernel:
     runs-on: ubuntu-latest
     env:
-      CUSTOM_KERNEL_VERSION: "1.35"
+      CUSTOM_KERNEL_VERSION: "1.35-ar9271"
 
     steps:
       - name: Free Runner Disk Space
@@ -40,7 +40,7 @@ jobs:
           path: |
             ~/.cache/bazel
             workspace/out/bazel
-          key: ${{ runner.os }}-bazel-shusky-v135
+          key: ${{ runner.os }}-bazel-shusky-v135-ar9271
 
       - name: Initialize & Sync Google Kernel Source
         run: |
@@ -51,41 +51,6 @@ jobs:
           repo init -u "$MANIFEST" -b "$BRANCH" --depth=1
           repo sync -c -j$(nproc) --no-tags --no-clone-bundle
 
-      - name: Inspect Kleaf Build Configuration
-        run: |
-          cd workspace
-
-          echo "===== DEFINE COMMON KERNELS ====="
-          nl -ba build/kernel/kleaf/common_kernels.bzl | sed -n '470,575p'
-
-          echo "===== KERNEL BUILD IMPLEMENTATION ====="
-          nl -ba build/kernel/kleaf/common_kernels.bzl | sed -n '625,750p'
-
-          echo "===== AOSP KERNEL TARGETS ====="
-          nl -ba aosp/BUILD.bazel | sed -n '135,170p'
-
-      - name: Inspect AOSP Bazel Kernel Definition
-        run: |
-          cd workspace
-          echo "===== AOSP BUILD.bazel ====="
-          sed -n '1,240p' aosp/BUILD.bazel
-          echo "===== SHUSKY BUILD.bazel ====="
-          grep -n -A35 -B10 "module_outs" \
-            private/devices/google/shusky/BUILD.bazel
-          echo "===== SHUSKY BUILD FILE: TOP ====="
-          sed -n '1,100p' private/devices/google/shusky/BUILD.bazel
-
-          echo "===== ZUMA MODULE OUTPUT DEFINITION ====="
-          grep -R -n -A100 -B10 "ZUMA_MODULE_OUTS" private/devices/google/zuma private/devices/google/shusky
-        
-      - name: Dump Build.bazel Files for Review
-        uses: actions/upload-artifact@v4
-        with:
-          name: bazel-build-scripts
-          path: |
-            workspace/aosp/BUILD.bazel
-            workspace/private/devices/google/shusky/BUILD.bazel
-            
       - name: Apply Kali NetHunter Subsystem Overrides
         run: |
           cd workspace/aosp
@@ -116,27 +81,15 @@ jobs:
           echo 'obj-y += rtl8812au/' >> "$RTL_DIR/Makefile"
           echo 'obj-m := $(MODULE_NAME).o' >> "$MK"
 
-      - name: Apply KernelSU-Next & NetHunter Configs
+      - name: Apply NetHunter & AR9271 Configs
         run: |
           cd workspace/aosp
-          KSU_URL="https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh"
-          curl -LSs "$KSU_URL" | bash -
-          KSU_GIT_VER=$(git -C KernelSU-Next rev-list --count HEAD)
-          KSU_TAG=$(git -C KernelSU-Next describe --tags --abbrev=0 2>/dev/null || echo "v3.4.2")
-          KB="KernelSU-Next/kernel/Kbuild"
-          sed -i "s/KSU_GIT_VERSION := .*/KSU_GIT_VERSION := ${KSU_GIT_VER}/g" "$KB"
-          sed -i "s/KSU_VERSION_TAG := .*/KSU_VERSION_TAG := ${KSU_TAG}/g" "$KB"
-          sed -i "1i KSU_GIT_VERSION := ${KSU_GIT_VER}" "$KB"
-          sed -i "1i KSU_GIT_VERSION_VALID := 1" "$KB"
-          sed -i "1i KSU_GIT_TAG := ${KSU_TAG}" "$KB"
-          sed -i "1i KSU_VERSION_TAG := ${KSU_TAG}" "$KB"
           chmod u+w build.config.gki
           echo "DEFCONFIG=gki_defconfig" > build.config.gki
           DEF="arch/arm64/configs/gki_defconfig"
           chmod u+w "$DEF"
           {
             echo 'CONFIG_LOCALVERSION="-twk.v${{ env.CUSTOM_KERNEL_VERSION }}"'
-            echo 'CONFIG_KSU=y'
             echo 'CONFIG_TRIM_NONLISTED_KMI=n'
             echo 'CONFIG_TASKSTATS=y'
             echo 'CONFIG_TASK_DELAY_ACCT=y'
@@ -189,6 +142,11 @@ jobs:
             echo 'CONFIG_MAC80211=m'
             echo 'CONFIG_CFG80211_CERTIFICATION_ONUS=y'
             echo 'CONFIG_WIRELESS=y'
+            echo 'CONFIG_WLAN_VENDOR_ATH=y'
+            echo 'CONFIG_ATH_COMMON=m'
+            echo 'CONFIG_ATH9K_HW=m'
+            echo 'CONFIG_ATH9K_COMMON=m'
+            echo 'CONFIG_ATH9K_HTC=m'
             echo 'CONFIG_WLAN_VENDOR_REALTEK=y'
             echo 'CONFIG_WLAN_VENDOR_MEDIATEK=y'
             echo 'CONFIG_MT76_CORE=m'
@@ -380,28 +338,18 @@ jobs:
             echo 'mt76x2_set_sar_specs'
           } > missing_symbols.txt
 
-          # Updating both GKI and Pixel-specific (shusky) KMI Symbol lists.
           for f in \
             aosp/android/abi_gki_aarch64 \
             aosp/android/abi_gki_aarch64_pixel; do
-            
-          if [ ! -f "$f" ]; then
-            echo "Missing configured KMI symbol list: $f" >&2
-            exit 1
-          fi
-          
-          chmod u+w "$f"
-          printf '\n' >> "$f"
-          cat missing_symbols.txt >> "$f"
-
-          echo "===== UPDATED: $f ====="
-            grep -n -E '^(mt76_alloc_device|__hci_cmd_sync|usb_submit_urb)$' "$f" || true
+            if [ ! -f "$f" ]; then
+              echo "Missing configured KMI symbol list: $f" >&2
+              exit 1
+            fi
+            chmod u+w "$f"
+            printf '\n' >> "$f"
+            cat missing_symbols.txt >> "$f"
           done
 
-          echo "===== SHUSKY KMI CONFIGURATION ====="
-          grep -n -C 3 'kmi_symbol_list' \
-            private/devices/google/shusky/BUILD.bazel
-            
       - name: Register Additional Modules in Zuma Kleaf Constants
         run: |
           cd workspace
@@ -410,40 +358,26 @@ jobs:
           from pathlib import Path
           import re
 
-          build_file = Path(
-              "private/devices/google/zuma/constants.bzl"
-          )
-
+          build_file = Path("private/devices/google/zuma/constants.bzl")
           if not build_file.is_file():
-              raise SystemExit(
-                  f"Missing expected file: {build_file}"
-              )
+              raise SystemExit(f"Missing expected file: {build_file}")
 
-          build_file.chmod(
-              build_file.stat().st_mode | 0o200
-          )
-
+          build_file.chmod(build_file.stat().st_mode | 0o200)
           source = build_file.read_text()
 
-          # Locate the shared ZUMA_MODULE_OUTS list.
-          pattern = re.compile(
-              r"(?ms)^(ZUMA_MODULE_OUTS\s*=\s*\[)(.*?)(^\])"
-          )
-
+          pattern = re.compile(r"(?ms)^(ZUMA_MODULE_OUTS\s*=\s*\[)(.*?)(^\])")
           match = pattern.search(source)
-
           if not match:
-              raise SystemExit(
-                  "Could not locate ZUMA_MODULE_OUTS list. "
-                  "No changes made."
-              )
+              raise SystemExit("Could not locate ZUMA_MODULE_OUTS list.")
 
           header, body, closing = match.groups()
 
-          # These are the additional modules identified
-          # in the previous Bazel build output.
           additions = {
               "drivers/bluetooth/btintel.ko",
+              "drivers/net/wireless/ath/ath.ko",
+              "drivers/net/wireless/ath/ath9k/ath9k_hw.ko",
+              "drivers/net/wireless/ath/ath9k/ath9k_common.ko",
+              "drivers/net/wireless/ath/ath9k/ath9k_htc.ko",
               "drivers/net/wireless/mediatek/mt76/mt76.ko",
               "drivers/net/wireless/mediatek/mt76/mt76-usb.ko",
               "drivers/net/wireless/mediatek/mt76/mt76x02-lib.ko",
@@ -453,55 +387,25 @@ jobs:
               "drivers/net/wireless/realtek/rtl8812au/8812au.ko",
           }
 
-          existing = set(
-              re.findall(
-                  r'"([^"]+\.ko)"',
-                  body
-              )
-          )
-
+          existing = set(re.findall(r'"([^"]+\.ko)"', body))
           combined = sorted(existing | additions)
 
-          # Preserve existing comments in the list.
           comments = [
               line for line in body.splitlines()
               if line.strip().startswith("#")
           ]
 
           new_body = "\n"
-
           for comment in comments:
               new_body += comment + "\n"
-
           for module in combined:
               new_body += f'    "{module}",\n'
 
           replacement = header + new_body + closing
-
-          updated = (
-              source[:match.start()]
-              + replacement
-              + source[match.end():]
-          )
-
+          updated = source[:match.start()] + replacement + source[match.end():]
           build_file.write_text(updated)
-
-          print("Updated:", build_file)
-          print("Existing module entries:", len(existing))
-          print("Additional entries:", len(additions - existing))
-          print("\nFinal ZUMA_MODULE_OUTS:")
-
-          for module in combined:
-              print("  " + module)
+          print("Updated ZUMA_MODULE_OUTS successfully.")
           PY
-
-          echo "===== UPDATED ZUMA MODULE OUTPUTS ====="
-          grep -n -A45 "ZUMA_MODULE_OUTS" \
-            private/devices/google/zuma/constants.bzl
-
-          echo "===== UPDATED AOSP KERNEL CONFIGURATION ====="
-          sed -n '1,100p' aosp/BUILD.bazel
-
 
       - name: Enable Kleaf Module Outputs
         run: |
@@ -510,39 +414,31 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          # First, teach the common-kernel wrapper to accept and forward module_outs.
           p = Path("build/kernel/kleaf/common_kernels.bzl")
           s = p.read_text()
 
           signature = "        module_implicit_outs = None,\n"
           assert s.count(signature) == 1, "Unexpected common_kernels.bzl signature"
-          s = s.replace(
-              signature,
-              signature + "        module_outs = None,\n",
-              1
-          )
+          s = s.replace(signature, signature + "        module_outs = None,\n", 1)
 
           forwarding = "        module_implicit_outs = module_implicit_outs,\n"
           assert s.count(forwarding) == 2, "Unexpected module forwarding locations"
-          s = s.replace(
-              forwarding,
-              forwarding + "        module_outs = module_outs,\n"
-          )
+          s = s.replace(forwarding, forwarding + "        module_outs = module_outs,\n")
 
           p.write_text(s)
-          print("Updated common_kernels.bzl successfully.")
 
-          # Next, register the additional modules for kernel_aarch64.
           p = Path("aosp/BUILD.bazel")
           s = p.read_text()
 
-          needle = '        "module_implicit_outs": get_gki_modules_list("arm64"),\n' 
+          needle = '        "module_implicit_outs": get_gki_modules_list("arm64"),\n'
           assert s.count(needle) >= 1, "Could not find kernel_aarch64 configuration"
 
-          # The GKI target may compile these drivers, but must not distribute
-          # competing copies. Shusky's ZUMA_MODULE_OUTS owns all six MT76 modules.
           replacement = '''        "module_implicit_outs": get_gki_modules_list("arm64") + [
               "drivers/bluetooth/btintel.ko",
+              "drivers/net/wireless/ath/ath.ko",
+              "drivers/net/wireless/ath/ath9k/ath9k_hw.ko",
+              "drivers/net/wireless/ath/ath9k/ath9k_common.ko",
+              "drivers/net/wireless/ath/ath9k/ath9k_htc.ko",
               "drivers/net/wireless/mediatek/mt76/mt76.ko",
               "drivers/net/wireless/mediatek/mt76/mt76-usb.ko",
               "drivers/net/wireless/mediatek/mt76/mt76x02-lib.ko",
@@ -564,17 +460,10 @@ jobs:
 
           s = s.replace(needle, replacement, 1)
           p.write_text(s)
-          print("Registered GKI module outputs without duplicating Shusky modules.")
-
+          print("Registered GKI module outputs successfully.")
           PY
 
-          echo "===== VERIFY COMMON KERNEL PATCH ====="
-          grep -n -A3 -B3 'module_outs' build/kernel/kleaf/common_kernels.bzl
-
-          echo "===== VERIFY AOSP MODULE LIST ====="
-          sed -n '138,175p' aosp/BUILD.bazel
-
-      - name: Compile Pixel 8 Pro Kernel via Bazel
+      - name: Compile Pixel 8 (shusky) Kernel via Bazel
         run: |
           cd workspace
           ./build_shusky.sh \
@@ -584,15 +473,13 @@ jobs:
             --notrim \
             --nokmi_symbol_list_strict_mode
 
-      - name: Verify Shusky MT76 Modules and Symbol CRCs
+      - name: Verify Shusky Wireless Modules
         run: |
           set -euo pipefail
           cd workspace
-
-          echo "===== REQUIRED SHUSKY WIRELESS MODULES ====="
           for ko in \
-            mt76.ko mt76-usb.ko mt76x02-lib.ko mt76x02-usb.ko \
-            mt76x2-common.ko mt76x2u.ko mac80211.ko cfg80211.ko; do
+            ath.ko ath9k_hw.ko ath9k_common.ko ath9k_htc.ko \
+            mac80211.ko cfg80211.ko; do
             test -s "out/shusky/dist/$ko" || {
               echo "ERROR: Shusky distribution is missing $ko" >&2
               exit 1
@@ -600,93 +487,12 @@ jobs:
             echo "Found: $ko"
           done
 
-          # This is Ubuntu's kmod, not Android's limited modprobe.
-          if ! modprobe --help 2>&1 | grep -q -- '--show-modversions'; then
-            sudo apt-get update
-            sudo apt-get install -y kmod
-          fi
-
-          echo "===== FIND SHUSKY SYMBOL TABLE ====="
-          symvers="$(find out/bazel -type f \
-            -path '*/private/devices/google/shusky/kernel/Module.symvers' \
-            -print -quit)"
-          if [ -z "$symvers" ]; then
-            echo "ERROR: Cannot find Shusky kernel Module.symvers" >&2
-            exit 1
-          fi
-          echo "Using: $symvers"
-
-          shusky_crc="$(awk '$2 == "ieee80211_alloc_hw_nm" { print tolower($1); exit }' "$symvers")"
-          mt76_crc="$(modprobe --show-modversions out/shusky/dist/mt76.ko \
-            | awk '$2 == "ieee80211_alloc_hw_nm" { print tolower($1); exit }')"
-
-          echo "Shusky mac80211 exported CRC: ${shusky_crc:-NOT FOUND}"
-          echo "Packaged mt76 required CRC:  ${mt76_crc:-NOT FOUND}"
-
-          if [ -z "$shusky_crc" ] || [ -z "$mt76_crc" ] || [ "$shusky_crc" != "$mt76_crc" ]; then
-            echo "ERROR: MT76 CRC does not match the Shusky wireless stack." >&2
-            echo "Refusing to package a potentially incompatible driver." >&2
-            exit 1
-          fi
-
-          echo "PASS: MT76 expects the Shusky mac80211 symbol version."
-          sha256sum out/shusky/dist/mt76.ko
-
-      - name: Diagnose MT76 Symbol Version Mismatch
-        run: |
-          cd workspace
-
-          if ! command -v modprobe >/dev/null 2>&1; then
-            sudo apt-get install -y kmod
-          fi
-
-          echo "===== MT76 EXPECTED SYMBOL VERSION ====="
-          modprobe --show-modversions \
-            out/shusky/dist/mt76.ko |
-            grep -F 'ieee80211_alloc_hw_nm' || true
-
-          echo "===== GKI MAC80211 EXPORTED VERSION ====="
-          grep -w 'ieee80211_alloc_hw_nm' \
-            out/shusky/dist/kernel_aarch64_Module.symvers
-
-          echo "===== SHUSKY MAC80211 EXPORTED VERSION ====="
-          find out/bazel -type f \
-            -path '*/private/devices/google/shusky/kernel/Module.symvers' \
-            -exec grep -H -w 'ieee80211_alloc_hw_nm' {} \; \
-            2>/dev/null | head -n 5
-
-          echo "===== PACKAGED MT76 FILE HASH ====="
-          sha256sum out/shusky/dist/mt76.ko
-
-      - name: Inspect Wireless Module Build Sources
-        run: |
-          cd workspace
-
-          echo "===== WIRELESS MODULE OUTPUTS ====="
-
-          for dir in out/aosp/dist out/shusky/dist; do
-            if [ -d "$dir" ]; then
-              echo "===== $dir ====="
-              find "$dir" -maxdepth 1 \
-                \( -name 'mac80211.ko' \
-                -o -name 'cfg80211.ko' \
-                -o -name 'mt76*.ko' \) \
-                -print
-            fi
-          done
-
-          echo "===== WIRELESS MODULE SYMBOL VERSIONS ====="
-          find out -name '*Module.symvers' \
-            -not -path '*/sandbox/*' \
-            -exec grep -H -w 'ieee80211_alloc_hw_nm' {} \; \
-            2>/dev/null | head -n 30 || true
-
       - name: Package Flat Release Bundle
         run: |
           cd workspace
           rm -rf bundle AnyKernel3
           git clone https://github.com/stoag/AnyKernel3-Pixel8Pro.git AnyKernel3
-          mkdir -p bundle AnyKernel3/twk_drivers AnyKernel3/twk_firmware
+          mkdir -p bundle AnyKernel3/twk_drivers AnyKernel3/twk_firmware/ath9k_htc
           BB_URL="https://raw.githubusercontent.com/xerta555/Busybox-Binaries/master/busybox-arm64"
           wget -qO AnyKernel3/tools/busybox "$BB_URL"
           chmod +x AnyKernel3/tools/busybox
@@ -698,27 +504,17 @@ jobs:
           rm -f magisk.zip
           cp -L out/shusky/dist/Image.lz4 AnyKernel3/
           FW_URL="https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain"
+          curl -fLSs "$FW_URL/htc_9271.fw" -o AnyKernel3/twk_firmware/htc_9271.fw || true
+          curl -fLSs "$FW_URL/ath9k_htc/htc_9271-1.4.0.fw" -o AnyKernel3/twk_firmware/ath9k_htc/htc_9271-1.4.0.fw || true
           for fw in mt7662.bin mt7662_rom_patch.bin mt7662u.bin mt7662u_rom_patch.bin; do
             curl -fLSs "$FW_URL/mediatek/$fw" -o "AnyKernel3/twk_firmware/$fw" \
               || curl -fLSs "$FW_URL/$fw" -o "AnyKernel3/twk_firmware/$fw" || true
           done
           curl -fLSs "$FW_URL/rt2870.bin" -o AnyKernel3/twk_firmware/rt2870.bin || true
-          # Never fall back to a GKI-built MT76 module: its symbol CRC may
-          # differ from the mac80211 module installed by the Shusky image.
           for ko in \
+            ath.ko ath9k_hw.ko ath9k_common.ko ath9k_htc.ko \
             mt76.ko mt76-usb.ko mt76x02-lib.ko mt76x02-usb.ko \
-            mt76x2-common.ko mt76x2u.ko; do
-            if [ ! -s "out/shusky/dist/$ko" ]; then
-              echo "ERROR: Missing required Shusky MT76 module: $ko" >&2
-              exit 1
-            fi
-            cp -L "out/shusky/dist/$ko" AnyKernel3/twk_drivers/
-          done
-
-          # Keep other drivers' existing packaging behavior for now.
-          # mac80211.ko and cfg80211.ko deliberately remain in partition images,
-          # not in the separately injected twk_drivers directory.
-          for ko in \
+            mt76x2-common.ko mt76x2u.ko \
             8812au.ko btintel.ko btrtl.ko btusb.ko \
             cdc-acm.ko usbserial.ko ch341.ko cp210x.ko ftdi_sio.ko \
             ax88179_178a.ko r8152.ko can.ko can-raw.ko can-dev.ko slcan.ko gs_usb.ko; do
@@ -741,14 +537,14 @@ jobs:
             echo 'MOD_DIR="/data/adb/modules/twk_nethunter_adapters"'
             echo 'rm -rf "$MOD_DIR"'
             echo 'mkdir -p "$MOD_DIR/twk_firmware" "$MOD_DIR/twk_modules"'
-            echo 'cp -f "$home"/twk_firmware/*.bin "$MOD_DIR/twk_firmware/"'
+            echo 'cp -rf "$home"/twk_firmware/* "$MOD_DIR/twk_firmware/"'
             echo 'cp -f "$home"/twk_drivers/*.ko "$MOD_DIR/twk_modules/"'
             echo 'echo "id=twk_nethunter_adapters" > "$MOD_DIR/module.prop"'
             echo 'echo "name=Tweaker Kernel Adapters" >> "$MOD_DIR/module.prop"'
-            echo 'echo "version=v1.35" >> "$MOD_DIR/module.prop"'
+            echo 'echo "version=v1.35-ar9271" >> "$MOD_DIR/module.prop"'
             echo 'echo "versionCode=135" >> "$MOD_DIR/module.prop"'
             echo 'echo "author=Tweaker" >> "$MOD_DIR/module.prop"'
-            echo 'echo "description=Non-shadowing RAM-disk drivers." >> "$MOD_DIR/module.prop"'
+            echo 'echo "description=Non-shadowing RAM-disk drivers with AR9271." >> "$MOD_DIR/module.prop"'
             echo 'SV="$MOD_DIR/service.sh"'
             echo 'echo "#!/system/bin/sh" > "$SV"'
             echo 'echo "MOD_DIR=/data/adb/modules/twk_nethunter_adapters" >> "$SV"'
@@ -757,10 +553,10 @@ jobs:
             echo 'echo "LOG=/dev/twk_modules/load.log" >> "$SV"'
             echo 'echo "ln -sf /vendor/firmware/* /dev/twk_firmware/ 2>/dev/null || true" >> "$SV"'
             echo 'echo "ln -sf /vendor/firmware/mediatek/* /dev/twk_firmware/ 2>/dev/null || true" >> "$SV"'
-            echo 'echo "cp -f \$MOD_DIR/twk_firmware/*.bin /dev/twk_firmware/ 2>/dev/null || true" >> "$SV"'
+            echo 'echo "cp -rf \$MOD_DIR/twk_firmware/* /dev/twk_firmware/ 2>/dev/null || true" >> "$SV"'
             echo 'echo "cp -f \$MOD_DIR/twk_modules/*.ko /dev/twk_modules/ 2>/dev/null || true" >> "$SV"'
             echo 'echo "echo -n /dev/twk_firmware > /sys/module/firmware_class/parameters/path" >> "$SV"'
-            echo 'for m in btintel.ko btrtl.ko btusb.ko mt76.ko mt76-usb.ko mt76x02-lib.ko mt76x02-usb.ko mt76x2-common.ko mt76x2u.ko cdc-acm.ko usbserial.ko ch341.ko cp210x.ko ftdi_sio.ko ax88179_178a.ko r8152.ko can.ko can-raw.ko can-dev.ko slcan.ko gs_usb.ko; do'
+            echo 'for m in ath.ko ath9k_hw.ko ath9k_common.ko ath9k_htc.ko btintel.ko btrtl.ko btusb.ko mt76.ko mt76-usb.ko mt76x02-lib.ko mt76x02-usb.ko mt76x2-common.ko mt76x2u.ko cdc-acm.ko usbserial.ko ch341.ko cp210x.ko ftdi_sio.ko ax88179_178a.ko r8152.ko can.ko can-raw.ko can-dev.ko slcan.ko gs_usb.ko; do'
             echo '  echo "[ -f /dev/twk_modules/$m ] && insmod /dev/twk_modules/$m >> \$LOG 2>&1 || true" >> "$SV"'
             echo 'done'
             echo 'echo "[ -f /dev/twk_modules/8812au.ko ] && insmod /dev/twk_modules/8812au.ko rtw_drv_log_level=6 rtw_power_mgnt=0 rtw_switch_usb_mode=0 >> \$LOG 2>&1 || true" >> "$SV"'
@@ -784,16 +580,3 @@ jobs:
           name: twk-v${{ env.CUSTOM_KERNEL_VERSION }}-release-package
           path: workspace/bundle/*
           if-no-files-found: error
-
-      - name: Ping Phone - Success
-        if: success()
-        run: |
-          MSG="✅ Pixel 8 Pro Kernel Build (v${{ env.CUSTOM_KERNEL_VERSION }}) COMPLETE!"
-          curl -d "$MSG" https://ntfy.sh/twk_pixel8_build_alerts
-
-      - name: Ping Phone - Failure
-        if: failure()
-        run: |
-          MSG="❌ Pixel 8 Pro Kernel Build (v${{ env.CUSTOM_KERNEL_VERSION }}) FAILED!"
-          curl -d "$MSG" https://ntfy.sh/twk_pixel8_build_alerts
-# END OF WORKFLOW
