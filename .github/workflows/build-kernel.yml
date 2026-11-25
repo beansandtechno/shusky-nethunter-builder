@@ -529,6 +529,7 @@ jobs:
           ls -lh AnyKernel3/twk_firmware/
           VER="${{ env.CUSTOM_KERNEL_VERSION }}"
           sed -i "s/kernel.string=.*/kernel.string=Tweaker Kernel (v${VER})/g" AnyKernel3/anykernel.sh
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           {
             echo '# --- TWEAKER KERNEL NON-SHADOWING ADAPTER INJECTION ---'
             echo 'ui_print " ";'
